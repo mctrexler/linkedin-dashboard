@@ -1,7 +1,27 @@
-import React from "react";
+"use client";
+import React, { useEffect, useState, useMemo } from "react";
 import Papa from "papaparse";
+import { parseLinkedInRelative } from "../utils/relativeDate";
+
 
 // -------------------- Helpers --------------------
+// ---- helpers (top of file, below imports) ----
+function safeTags(row) {
+    if (Array.isArray(row?.tags_list)) return row.tags_list.filter(Boolean);
+
+    if (Array.isArray(row?.tags)) {
+        return row.tags
+            .map((t) => String(t || "").toLowerCase().trim())
+            .filter(Boolean);
+    }
+
+    return String(row?.tags || "")
+        .toLowerCase()
+        .split(/[;,]\s*/g)
+        .map((t) => t.trim())
+        .filter(Boolean);
+}
+
 // Extract a single-column list from a CSV (case-insensitive, flexible headers)
 function extractCSVList(rows, candidates) {
     if (!Array.isArray(rows) || !rows.length) return [];
@@ -135,56 +155,90 @@ export default function LinkedInPostsPage() {
 }
 
 function LinkedInPostsDashboard() {
-    const [rows, setRows] = React.useState([]);
-    const [loading, setLoading] = React.useState(true);
-    const [error, setError] = React.useState("");
+    const [rows, setRows] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState("");
 
     // Filters / controls
-    const [authors, setAuthors] = React.useState([]);
-    const [tags, setTags] = React.useState([]);
-    const [period, setPeriod] = React.useState(30); // 7, 30, 90, or -1 (all)
-    const [maxResults, setMaxResults] = React.useState(200);
-    const [search, setSearch] = React.useState("");
+    const [authors, setAuthors] = useState([]);
+    const [tags, setTags] = useState([]);
+    const [period, setPeriod] = useState(30); // 7, 30, 90, or -1 (all)
+    const [maxResults, setMaxResults] = useState(200);
+    const [search, setSearch] = useState("");
 
-    const [authorOptions, setAuthorOptions] = React.useState([]); // curated list if provided
-    const [tagOptions, setTagOptions] = React.useState([]);       // curated list if provided
+    const [authorOptions, setAuthorOptions] = useState([]); // curated list if provided
+    const [tagOptions, setTagOptions] = useState([]);       // curated list if provided
 
 
     // Load CSV from /public
-    React.useEffect(() => {
-        let cancelled = false;
+
+    useEffect(() => {
         async function load() {
+            setLoading(true);
+            setError("");
+
             try {
                 const res = await fetch("/linkedin_posts.csv", { cache: "no-store" });
-                if (!res.ok) throw new Error(`HTTP ${res.status} `);
+                if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
                 const text = await res.text();
-                const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
 
-                const normalized = (parsed.data || [])
-                    .map((r) => normalizeRow(r))
-                    .filter((r) => truthyInclude(r.include) && r.title && r.url);
+                // Parse WITHOUT headers first to handle "Column1,Column2,..." dummy header
+                const first = Papa.parse(text, { header: false, skipEmptyLines: true, delimiter: "" });
+                const rowsA = first.data || [];
+                if (!rowsA.length) throw new Error("CSV empty");
 
-                if (!cancelled) {
-                    setRows(normalized);
-                    setLoading(false);
-                }
+                const looksDummy = rowsA[0].every((c) => /^column\d+$/i.test(String(c || "").trim()));
+                const headerRowIdx = looksDummy ? 1 : 0;
+                const dataStartIdx = headerRowIdx + 1;
+
+                const toKey = (h) => String(h || "").trim().toLowerCase().replace(/\s+/g, "_");
+                const headers = (rowsA[headerRowIdx] || []).map(toKey);
+                const dataRows = rowsA.slice(dataStartIdx);
+
+                const mapped = dataRows.map((r) => {
+                    const o = {};
+                    headers.forEach((h, i) => (o[h] = r[i] ?? ""));
+
+                    // Normalize to your field names
+                    o.include = String(o.include || "y").trim().toLowerCase();
+                    o.author = String(o.author || "").trim();
+                    o.headline = String(o.headline || "").trim();
+                    o.summary = String(o.summary || "").trim();
+                    o.tags = String(o.tags || "").trim();
+                    o.url = String(o.post_url || o.url || "").split("?")[0].trim();
+
+                    // Relative date → absolute
+                    const rel = parseLinkedInRelative(String(o.posted_iso || "").trim());
+                    o.posted_at = rel.posted_at;
+                    o.posted_iso_abs = rel.posted_iso;
+                    o.posted_age_days = rel.posted_age_days;
+
+                    // Pre-split tags for filtering
+                    o.tags_list = String(o.tags || "")
+                        .toLowerCase()
+                        .split(/[;,]\s*/g)
+                        .map((t) => t.trim())
+                        .filter(Boolean);
+
+                    return o;
+                });
+
+                console.info("CSV mapped rows:", mapped.length, { headers });
+                setRows(mapped);
             } catch (e) {
-                console.warn("linkedin_posts.csv not found:", e);
-                if (!cancelled) {
-                    setError("linkedin_posts.csv not found.");
-                    setRows([]);
-                    setLoading(false);
-                }
+                console.error(e);
+                setError(String(e?.message || e));
+                setRows([]);
+            } finally {
+                setLoading(false);
             }
         }
         load();
-        return () => {
-            cancelled = true;
-        };
     }, []);
 
+
     // Curated allowlists for dropdowns (use curated if file exists; otherwise fallback)
-    React.useEffect(() => {
+    useEffect(() => {
         let cancelled = false;
 
         async function loadCuratedOptions() {
@@ -224,7 +278,7 @@ function LinkedInPostsDashboard() {
 
     function normalizeRow(r) {
         const include = r.Include ?? r.include ?? r.INCLUDE ?? "";
-        const dateRaw = (r.posted_iso || r.post_date_iso || r.date || r.posted || "").trim();
+        const dateRaw = (r.posted_at || r.post_date_iso || r.date || r.posted || "").trim();
         const dateObj = parseAnyDate(dateRaw);
         const author = (r.author || r.author_name || r.Author || "").trim();
         const title = (r.headline || r.title || "").trim();
@@ -235,55 +289,122 @@ function LinkedInPostsDashboard() {
         return { include, dateRaw, dateObj, author, title, summary, tags, url };
     }
 
-    const allAuthors = React.useMemo(() => uniqueSorted(rows.map(r => r.author)), [rows]);
-    const allTags = React.useMemo(() => uniqueSorted(rows.flatMap(r => r.tags)), [rows]);
+    const allAuthors = useMemo(() => uniqueSorted(rows.map(r => r.author)), [rows]);
+    const allTags = useMemo(() => uniqueSorted(rows.flatMap(r => r.tags)), [rows]);
 
     // ⬇️ paste these two effects here
-    React.useEffect(() => {
+    useEffect(() => {
         const allowed = (authorOptions.length ? authorOptions : allAuthors);
         setAuthors(prev => prev.filter(a => allowed.includes(a)));
     }, [authorOptions, allAuthors]);
 
-    React.useEffect(() => {
+    useEffect(() => {
         const allowed = (tagOptions.length ? tagOptions : allTags);
         setTags(prev => prev.filter(t => allowed.includes(t)));
     }, [tagOptions, allTags]);
 
 
-    const filtered = React.useMemo(() => {
+    const filtered = useMemo(() => {
         let out = rows;
 
-        if (authors.length) out = out.filter((r) => authors.includes(r.author));
-        if (tags.length) out = out.filter((r) => r.tags.some((t) => tags.includes(t)));
+        // helper to normalize text once
+        const norm = (s) => String(s || "").trim().toLowerCase();
 
-        if (period > 0) {
-            const cutoff = new Date();
-            cutoff.setUTCDate(cutoff.getUTCDate() - period);
-            out = out.filter((r) => r.dateObj && r.dateObj >= cutoff);
+        // --- normalize period (supports 30, "30", "30d", "all", "all time", "any") ---
+        const pStr = typeof period === "string" ? norm(period) : period;
+        let p = pStr;
+        if (typeof pStr === "string") {
+            if (/^(all|any|all\s*time)$/.test(pStr)) {
+                p = "all";
+            } else {
+                const m = pStr.match(/^(\d+)\s*d?$/i);
+                p = m ? Number(m[1]) : "all";
+            }
         }
 
-        if (search.trim()) {
-            const q = search.trim().toLowerCase();
-            out = out.filter(
-                (r) =>
-                    r.title.toLowerCase().includes(q) ||
-                    r.author.toLowerCase().includes(q) ||
-                    (r.summary || "").toLowerCase().includes(q) ||
-                    r.tags.join(",").toLowerCase().includes(q)
-            );
+        // Include flag: only drop explicit 'n'; keep others (fail open)
+        out = out.filter((r) => (r.include ?? "y") !== "n");
+
+        // Authors (case-insensitive)
+        if (authors && authors.length) {
+            const want = new Set(authors.map(norm));
+            out = out.filter((r) => want.has(norm(r.author)));
         }
 
+        // Tags: prefer pre-split r.tags_list; fallback to splitting r.tags string
+        const tagsOf = (r) =>
+            Array.isArray(r?.tags_list)
+                ? r.tags_list
+                : norm(r?.tags || "")
+                    .split(/[;,]\s*/g)
+                    .map((t) => t.trim())
+                    .filter(Boolean);
+
+        if (tags && tags.length) {
+            const want = new Set(tags.map(norm));
+            out = out.filter((r) => tagsOf(r).some((t) => want.has(t)));
+        }
+
+        // Period filter (p is either "all" or a number of days). If no parsed date, KEEP the row (fail open).
+        if (p && p !== "all") {
+            const days = Number(p);
+            if (!Number.isNaN(days) && days > 0) {
+                const cutoff = Date.now() - days * 86400000;
+                out = out.filter((r) => {
+                    const t =
+                        r.posted_at instanceof Date && !isNaN(r.posted_at)
+                            ? r.posted_at.getTime()
+                            : r.dateObj instanceof Date && !isNaN(r.dateObj) // legacy fallback
+                                ? r.dateObj.getTime()
+                                : NaN;
+                    if (isNaN(t)) return true; // fail open
+                    return t >= cutoff;
+                });
+            }
+        }
+
+        // Search across headline/summary/author/tags (using tagsOf to avoid string/array issues)
+        if (search?.trim()) {
+            const q = norm(search);
+            out = out.filter((r) => {
+                const tagText = safeTags(r).join(" ");
+                const hay = [r.headline, r.title, r.summary, r.author, tagText]
+                    .map(norm)
+                    .join(" ");
+                return hay.includes(q);
+            });
+        }
+
+        // Sort: newest first (posted_at/dateObj), then author, then headline/title
         return [...out].sort((a, b) => {
-            const at = a.dateObj ? a.dateObj.getTime() : 0;
-            const bt = b.dateObj ? b.dateObj.getTime() : 0;
-            if (bt !== at) return bt - at;
-            const s = a.author.localeCompare(b.author);
+            const ta =
+                a.posted_at instanceof Date && !isNaN(a.posted_at)
+                    ? a.posted_at.getTime()
+                    : a.dateObj instanceof Date && !isNaN(a.dateObj)
+                        ? a.dateObj.getTime()
+                        : 0;
+
+            const tb =
+                b.posted_at instanceof Date && !isNaN(b.posted_at)
+                    ? b.posted_at.getTime()
+                    : b.dateObj instanceof Date && !isNaN(b.dateObj)
+                        ? b.dateObj.getTime()
+                        : 0;
+
+            if (tb !== ta) return tb - ta;
+
+            const s = String(a.author || "").localeCompare(String(b.author || ""));
             if (s !== 0) return s;
-            return a.title.localeCompare(b.title);
+
+            return String(a.headline || a.title || "").localeCompare(
+                String(b.headline || b.title || "")
+            );
         });
     }, [rows, authors, tags, period, search]);
 
-    const limited = React.useMemo(
+
+
+    const limited = useMemo(
         () => (!maxResults || maxResults === -1 ? filtered : filtered.slice(0, maxResults)),
         [filtered, maxResults]
     );
@@ -377,11 +498,11 @@ function LinkedInPostsDashboard() {
 
 // -------------------- Card --------------------
 function LinkedInCard({ row }) {
-    const [open, setOpen] = React.useState(false);
-    const [openUp, setOpenUp] = React.useState(false);
+    const [open, setOpen] = useState(false);
+    const [openUp, setOpenUp] = useState(false);
     const cardRef = React.useRef(null);
 
-    React.useEffect(() => {
+    useEffect(() => {
         function onDocClick(e) { if (!cardRef.current) return; if (!cardRef.current.contains(e.target)) setOpen(false); }
         function onKey(e) { if (e.key === 'Escape') setOpen(false); }
         document.addEventListener('mousedown', onDocClick);
@@ -416,32 +537,38 @@ function LinkedInCard({ row }) {
         >
             {/* Author + Headline */}
             <div className="mb-1">
-                <div className="text-[11px] uppercase tracking-wide text-gray-500">{row.author}</div>
+                <div className="text-[11px] uppercase tracking-wide text-gray-500">
+                    {row.author || "(unknown)"}
+                </div>
                 <div className="text-base font-semibold leading-snug">
                     {row.url ? (
-                        <a href={row.url} target="_blank" rel="noreferrer" className="hover:underline">{row.title}</a>
-                    ) : row.title}
+                        <a href={row.url} target="_blank" rel="noreferrer" className="hover:underline">
+                            {row.headline || row.title || "(no title)"}
+                        </a>
+                    ) : (row.headline || row.title || "(no title)")}
                 </div>
             </div>
 
             {/* Date */}
-            {row.dateObj ? (
-                <div className="text-xs text-gray-500 mb-2">{formatDateShort(row.dateObj)}</div>
-            ) : row.dateRaw ? (
-                <div className="text-xs text-gray-500 mb-2">{row.dateRaw}</div>
-            ) : null}
+            {(() => {
+                const isValid = (d) => d instanceof Date && !isNaN(d.getTime());
+                let when = "";
 
-            {/* Tag chips on the card */}
-            {row.tags && row.tags.length ? (
-                <div className="mt-2 flex flex-wrap gap-1">
-                    {row.tags.slice(0, 6).map((t) => (
-                        <span key={t} className="text-[11px] px-2 py-0.5 border rounded-full">{t}</span>
-                    ))}
-                    {row.tags.length > 6 && (
-                        <span className="text-[11px] px-2 py-0.5 border rounded-full">+{row.tags.length - 6}</span>
-                    )}
-                </div>
-            ) : null}
+                if (isValid(row?.posted_at)) {
+                    when = typeof formatDateShort === "function"
+                        ? formatDateShort(row.posted_at)
+                        : `${row.posted_at.getFullYear()}-${String(row.posted_at.getMonth() + 1).padStart(2, "0")}-${String(row.posted_at.getDate()).padStart(2, "0")}`;
+                } else if (isValid(row?.dateObj)) {
+                    when = typeof formatDateShort === "function"
+                        ? formatDateShort(row.dateObj)
+                        : `${row.dateObj.getFullYear()}-${String(row.dateObj.getMonth() + 1).padStart(2, "0")}-${String(row.dateObj.getDate()).padStart(2, "0")}`;
+                } else {
+                    when = row?.posted_iso_abs || row?.dateRaw || row?.posted_iso || "";
+                }
+
+                return when ? <div className="text-xs text-gray-500 mb-2">{when}</div> : null;
+            })()}
+
 
             {/* Overlay */}
             {open && (
@@ -467,7 +594,7 @@ function LinkedInCard({ row }) {
                         {row.summary && <p className="mt-2 text-gray-700">{row.summary}</p>}
                         {row.tags?.length ? (
                             <div className="mt-2 flex flex-wrap gap-1">
-                                {row.tags.map((t) => (
+                                {safeTags(row).map((t) => (
                                     <span key={t} className="text-[11px] px-2 py-0.5 border rounded-full">
                                         {t}
                                     </span>
@@ -488,18 +615,20 @@ function LinkedInCard({ row }) {
     );
 }
 
-function MultiSelect({ options, selected, onChange, placeholder }) {
-    const [open, setOpen] = React.useState(false);
-    const [query, setQuery] = React.useState("");
-    const [temp, setTemp] = React.useState([]);
+// --- MultiSelect (top-level component; not nested inside another function) ---
+function MultiSelect({ options = [], selected = [], onChange, placeholder = "Select…" }) {
     const rootRef = React.useRef(null);
+    const [open, setOpen] = useState(false);
+    const [query, setQuery] = useState("");
+    const [temp, setTemp] = useState(selected);
 
-    function openMenu() {
+    // keep temp in sync if parent selection changes
+    useEffect(() => {
         setTemp(selected);
-        setOpen(true);
-    }
+    }, [selected]);
 
-    React.useEffect(() => {
+    // close on outside click / Escape
+    useEffect(() => {
         function onDocClick(e) {
             if (!rootRef.current) return;
             if (!rootRef.current.contains(e.target)) setOpen(false);
@@ -515,24 +644,29 @@ function MultiSelect({ options, selected, onChange, placeholder }) {
         };
     }, []);
 
-    const filtered = React.useMemo(() => {
-        const q = query.trim().toLowerCase();
-        return q ? options.filter((o) => o.toLowerCase().includes(q)) : options;
+    // filter options by query
+    const filtered = useMemo(() => {
+        const list = Array.isArray(options) ? options : [];
+        const q = (query || "").trim().toLowerCase();
+        return q ? list.filter((o) => String(o).toLowerCase().includes(q)) : list;
     }, [options, query]);
 
     function toggle(item) {
-        const s = new Set(temp);
-        s.has(item) ? s.delete(item) : s.add(item);
-        setTemp(Array.from(s));
+        setTemp((prev) => (prev.includes(item) ? prev.filter((x) => x !== item) : [...prev, item]));
     }
-    function apply(closeAfter = false) {
-        onChange(temp);
+    function apply(closeAfter = true) {
+        onChange?.(temp);
         if (closeAfter) setOpen(false);
     }
     function clear(closeAfter = false) {
         setTemp([]);
-        onChange([]);
+        onChange?.([]);
         if (closeAfter) setOpen(false);
+    }
+    function openMenu() {
+        setOpen(true);
+        setQuery("");
+        setTemp(selected);
     }
 
     return (
@@ -540,13 +674,15 @@ function MultiSelect({ options, selected, onChange, placeholder }) {
             <button
                 type="button"
                 className="w-full border rounded px-3 py-2 text-left text-sm flex justify-between"
-                onClick={() => {
-                    open ? setOpen(false) : openMenu();
-                }}
+                onClick={() => (open ? setOpen(false) : openMenu())}
                 aria-expanded={open}
             >
                 <span>
-                    {selected.length ? `${selected.length} selected` : <span className="text-gray-400">{placeholder}</span>}
+                    {selected.length ? (
+                        `${selected.length} selected`
+                    ) : (
+                        <span className="text-gray-400">{placeholder}</span>
+                    )}
                 </span>
                 <span className="text-gray-400">▾</span>
             </button>
