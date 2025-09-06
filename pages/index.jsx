@@ -4,6 +4,7 @@ import Papa from "papaparse";
 import { parseLinkedInRelative } from "../utils/relativeDate";
 
 
+
 // -------------------- Helpers --------------------
 // ---- helpers (top of file, below imports) ----
 function safeTags(row) {
@@ -21,6 +22,7 @@ function safeTags(row) {
         .map((t) => t.trim())
         .filter(Boolean);
 }
+
 
 // Extract a single-column list from a CSV (case-insensitive, flexible headers)
 function extractCSVList(rows, candidates) {
