@@ -164,7 +164,7 @@ function LinkedInPostsDashboard() {
     // Filters / controls
     const [authors, setAuthors] = useState([]);
     const [tags, setTags] = useState([]);
-    const [period, setPeriod] = useState(30); // 7, 30, 90, or -1 (all)
+    const [period, setPeriod] = useState(-1); // All time by default
     const [maxResults, setMaxResults] = useState(200);
     const [search, setSearch] = useState("");
 
@@ -172,111 +172,28 @@ function LinkedInPostsDashboard() {
     const [tagOptions, setTagOptions] = useState([]);       // curated list if provided
 
 
-    // Load CSV from /public
-
+    // Credentials and unpublished rows remain on the server.
     useEffect(() => {
+        const controller = new AbortController();
         async function load() {
-            setLoading(true);
-            setError("");
-
             try {
-                const res = await fetch("/linkedin_posts.csv", { cache: "no-store" });
-                if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
-                const text = await res.text();
-
-                // Parse WITHOUT headers first to handle "Column1,Column2,..." dummy header
-                const first = Papa.parse(text, { header: false, skipEmptyLines: true, delimiter: "" });
-                const rowsA = first.data || [];
-                if (!rowsA.length) throw new Error("CSV empty");
-
-                const looksDummy = rowsA[0].every((c) => /^column\d+$/i.test(String(c || "").trim()));
-                const headerRowIdx = looksDummy ? 1 : 0;
-                const dataStartIdx = headerRowIdx + 1;
-
-                const toKey = (h) => String(h || "").trim().toLowerCase().replace(/\s+/g, "_");
-                const headers = (rowsA[headerRowIdx] || []).map(toKey);
-                const dataRows = rowsA.slice(dataStartIdx);
-
-                const mapped = dataRows.map((r) => {
-                    const o = {};
-                    headers.forEach((h, i) => (o[h] = r[i] ?? ""));
-
-                    // Normalize to your field names
-                    o.include = String(o.include || "y").trim().toLowerCase();
-                    o.author = String(o.author || "").trim();
-                    o.headline = String(o.headline || "").trim();
-                    o.summary = String(o.summary || "").trim();
-                    o.tags = String(o.tags || "").trim();
-                    o.url = String(o.post_url || o.url || "").split("?")[0].trim();
-
-                    // Relative date → absolute
-                    const rel = parseLinkedInRelative(String(o.posted_iso || "").trim());
-                    o.posted_at = rel.posted_at;
-                    o.posted_iso_abs = rel.posted_iso;
-                    o.posted_age_days = rel.posted_age_days;
-
-                    // Pre-split tags for filtering
-                    o.tags_list = String(o.tags || "")
-                        .toLowerCase()
-                        .split(/[;,]\s*/g)
-                        .map((t) => t.trim())
-                        .filter(Boolean);
-
-                    return o;
-                });
-
-                console.info("CSV mapped rows:", mapped.length, { headers });
-                setRows(mapped);
+                const response = await fetch('/api/posts', { signal: controller.signal });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || 'Collection unavailable');
+                setRows(data.posts.map(r => ({ ...r,
+                    posted_at: r.posted_iso ? new Date(r.posted_iso + 'T00:00:00Z') : null,
+                    posted_iso_abs: r.posted_iso,
+                    tags_list: r.tags.toLowerCase().split(/[;,]/).map(t => t.trim()).filter(Boolean)
+                })));
+                setAuthorOptions(uniqueSorted(data.posts.map(r => r.author)));
+                setTagOptions(uniqueSorted(data.posts.flatMap(r => r.tags.split(/[;,]/).map(t => t.trim()).filter(Boolean))));
             } catch (e) {
-                console.error(e);
-                setError(String(e?.message || e));
-                setRows([]);
-            } finally {
-                setLoading(false);
-            }
+                if (e.name !== 'AbortError') setError(e.message);
+            } finally { setLoading(false); }
         }
         load();
+        return () => controller.abort();
     }, []);
-
-
-    // Curated allowlists for dropdowns (use curated if file exists; otherwise fallback)
-    useEffect(() => {
-        let cancelled = false;
-
-        async function loadCuratedOptions() {
-            const authorsCSV = await tryFetchCSV("/linkedin_authors.csv");
-            const tagsCSV = await tryFetchCSV("/linkedin_tags.csv");
-
-            // If the curated file exists (even if empty), prefer curated list; otherwise fallback to computed
-            const useCuratedAuthors = authorsCSV !== null;
-            const useCuratedTags = tagsCSV !== null;
-
-            const curatedAuthors = useCuratedAuthors
-                ? extractCSVList(authorsCSV, ['author', 'name', 'author_name', 'authors'])
-                : [];
-            const curatedTags = useCuratedTags
-                ? extractCSVList(tagsCSV, ['tag', 'tags', 'topic', 'label'])
-                : [];
-
-            const fallbackAuthors = Array.from(new Set(rows.map(r => r.author))).sort((a, b) => a.localeCompare(b));
-            const fallbackTags = Array.from(new Set(rows.flatMap(r => r.tags))).sort((a, b) => a.localeCompare(b));
-
-            if (!cancelled) {
-                setAuthorOptions(useCuratedAuthors ? curatedAuthors : fallbackAuthors);
-                setTagOptions(useCuratedTags ? curatedTags : fallbackTags);
-            }
-        }
-
-        if (rows.length) {
-            loadCuratedOptions();
-        } else {
-            setAuthorOptions([]);
-            setTagOptions([]);
-        }
-
-        return () => { cancelled = true; };
-    }, [rows]);
-
 
     function normalizeRow(r) {
         const include = r.Include ?? r.include ?? r.INCLUDE ?? "";
@@ -359,7 +276,7 @@ function LinkedInPostsDashboard() {
                             : r.dateObj instanceof Date && !isNaN(r.dateObj) // legacy fallback
                                 ? r.dateObj.getTime()
                                 : NaN;
-                    if (isNaN(t)) return true; // fail open
+                    if (isNaN(t)) return false; // Week-only records remain available under All time
                     return t >= cutoff;
                 });
             }
@@ -370,7 +287,7 @@ function LinkedInPostsDashboard() {
             const q = norm(search);
             out = out.filter((r) => {
                 const tagText = safeTags(r).join(" ");
-                const hay = [r.headline, r.title, r.summary, r.author, tagText]
+                const hay = [r.headline, r.title, r.summary, r.full_summary, r.author, tagText]
                     .map(norm)
                     .join(" ");
                 return hay.includes(q);
@@ -476,7 +393,7 @@ function LinkedInPostsDashboard() {
                                 setAuthors([]);
                                 setTags([]);
                                 setSearch("");
-                                setPeriod(30);
+                                setPeriod(-1);
                             }}
                         >
                             Reset
@@ -489,6 +406,8 @@ function LinkedInPostsDashboard() {
                 Showing <strong>{limited.length}</strong> of <strong>{filtered.length}</strong> (from {rows.length} total).
             </div>
 
+            {!error && rows.length === 0 && <p>No posts have been published to this collection yet.</p>}
+            {!error && rows.length > 0 && limited.length === 0 && <p>No posts match these filters. Try All time or reset the filters.</p>}
             <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {limited.map((r, idx) => (
                     <LinkedInCard key={`${r.author}| ${r.title}| ${r.dateRaw}| ${idx} `} row={r} />
@@ -502,6 +421,7 @@ function LinkedInPostsDashboard() {
 function LinkedInCard({ row }) {
     const [open, setOpen] = useState(false);
     const [openUp, setOpenUp] = useState(false);
+    const [showFull, setShowFull] = useState(false);
     const cardRef = React.useRef(null);
 
     useEffect(() => {
@@ -551,6 +471,8 @@ function LinkedInCard({ row }) {
                 </div>
             </div>
 
+            <button className="text-sm underline mt-2" onClick={() => setShowFull(true)}>Read full summary</button>
+            {showFull && <SummaryDialog row={row} onClose={() => setShowFull(false)} />}
             {/* Date */}
             {(() => {
                 const isValid = (d) => d instanceof Date && !isNaN(d.getTime());
@@ -565,7 +487,7 @@ function LinkedInCard({ row }) {
                         ? formatDateShort(row.dateObj)
                         : `${row.dateObj.getFullYear()}-${String(row.dateObj.getMonth() + 1).padStart(2, "0")}-${String(row.dateObj.getDate()).padStart(2, "0")}`;
                 } else {
-                    when = row?.posted_iso_abs || row?.dateRaw || row?.posted_iso || "";
+                    when = row?.posted_iso_abs || row?.iso_week || "";
                 }
 
                 return when ? <div className="text-xs text-gray-500 mb-2">{when}</div> : null;
@@ -587,7 +509,7 @@ function LinkedInCard({ row }) {
                             ×
                         </button>
                         <div className="font-semibold pr-6">{row.author}</div>
-                        <div>{row.title}</div>
+                        <div>{row.headline || row.title}</div>
                         {row.dateObj ? (
                             <div className="text-xs text-gray-500">{formatDateShort(row.dateObj)}</div>
                         ) : row.dateRaw ? (
@@ -732,4 +654,20 @@ function MultiSelect({ options = [], selected = [], onChange, placeholder = "Sel
             )}
         </div>
     );
+}
+
+function SummaryDialog({ row, onClose }) {
+    const ref = React.useRef(null);
+    useEffect(() => {
+        const prior = document.activeElement;
+        ref.current?.showModal();
+        return () => { ref.current?.close(); prior?.focus(); };
+    }, []);
+    return <dialog ref={ref} onCancel={onClose} className="rounded-xl p-6 w-full max-w-3xl max-h-[90vh] backdrop:bg-black/40" aria-label={row.headline}>
+        <button className="float-right border rounded px-3 py-1" onClick={onClose}>Close</button>
+        <h2 className="text-xl font-semibold pr-20">{row.headline}</h2>
+        <p className="mt-2 text-sm text-gray-500">{row.author}</p>
+        <a className="inline-block underline my-4" href={row.url} target="_blank" rel="noreferrer">Open original LinkedIn post</a>
+        <div className="whitespace-pre-wrap break-words text-sm leading-7">{row.full_summary || row.summary}</div>
+    </dialog>;
 }
