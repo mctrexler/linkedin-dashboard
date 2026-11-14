@@ -340,17 +340,18 @@ function LinkedInPostsDashboard() {
 
     return (
         <div className="p-6 space-y-6">
-            <header className="space-y-1">
-                <h1 className="text-2xl font-semibold tracking-tight">LinkedIn Posts Dashboard</h1>
-                <p className="text-sm text-gray-600">
-                    Filter by author, tags, and date window. Hover/click any card to read the summary and open the post.
-                </p>
-                {error && (
-                    <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 inline-block">
-                        {error}
-                    </div>
-                )}
+            <header className="rounded-2xl border border-slate-200 bg-slate-50 p-5 sm:p-8 space-y-4">
+                <p className="text-xs font-semibold uppercase tracking-widest text-slate-600">A curated collection from the Climatographers</p>
+                <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight text-slate-900">Climate Change on LinkedIn: Post Explorer</h1>
+                <p className="max-w-4xl text-base sm:text-lg leading-relaxed text-slate-700">Discover climate conversations you might otherwise miss. Browse recent posts, explore a topic, or find contributions from a particular author—then follow the links to read, engage, and join the conversation on LinkedIn.</p>
+                <div className="grid gap-4 lg:grid-cols-2 text-sm leading-relaxed text-slate-600">
+                    <p>This explorer complements the Climatographers’ short LinkedIn post reviews and our <em>Climate Change on LinkedIn</em> newsletter. It also offers a different experience from our Gemini Notebook: the Notebook helps weave connections and stories across post summaries; this tool helps you browse and locate individual posts.</p>
+                    <p>This is a selective collection, not a comprehensive archive of climate content on LinkedIn. We add dozens of posts each week, using short summaries and topic tags to make worthwhile contributions easier to discover.</p>
+                </div>
+                <p className="border-t border-slate-200 pt-4 text-sm leading-relaxed text-slate-700"><strong>Our purpose is discovery that leads back to LinkedIn.</strong> The summaries help you decide what interests you; each post’s title takes you directly to the original, where the full content and conversation belong.</p>
+                {error && <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 inline-block">{error}</div>}
             </header>
+            <p className="text-sm leading-relaxed text-gray-600">Browse by author or topic, search the collection, or select a date window. Choose “Read full summary” for more context; click a post title to open LinkedIn.</p>
 
             {/* Controls */}
             <section className="grid gap-4 md:grid-cols-3">
