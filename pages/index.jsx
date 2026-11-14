@@ -349,6 +349,13 @@ function LinkedInPostsDashboard() {
                     <p>This is a selective collection, not a comprehensive archive of climate content on LinkedIn. We add dozens of posts each week, using short summaries and topic tags to make worthwhile contributions easier to discover.</p>
                 </div>
                 <p className="border-t border-slate-200 pt-4 text-sm leading-relaxed text-slate-700"><strong>Our purpose is discovery that leads back to LinkedIn.</strong> The summaries help you decide what interests you; each post’s title takes you directly to the original, where the full content and conversation belong.</p>
+                <div className="rounded-xl bg-white border border-slate-200 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                    <div>
+                        <h2 className="font-semibold text-slate-900">Keep up with climate conversations on LinkedIn</h2>
+                        <p className="mt-1 text-sm leading-relaxed text-slate-600">Subscribe to the Climatographers’ <em>Climate Change on LinkedIn</em> newsletter for curated posts, short reviews, and connections across the topics that matter.</p>
+                    </div>
+                    <a href="https://www.linkedin.com/newsletters/climate-change-on-linkedin-7246276184802504704/" target="_blank" rel="noopener noreferrer" className="inline-flex shrink-0 items-center justify-center rounded-lg bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900">Subscribe to the newsletter<span className="sr-only"> (opens LinkedIn in a new tab)</span></a>
+                </div>
                 {error && <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 inline-block">{error}</div>}
             </header>
             <p className="text-sm leading-relaxed text-gray-600">Browse by author or topic, search the collection, or select a date window. Choose “Read full summary” for more context; click a post title to open LinkedIn.</p>
