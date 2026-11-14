@@ -191,8 +191,10 @@ function LinkedInPostsDashboard() {
                     posted_iso_abs: r.posted_iso,
                     tags_list: r.tags.toLowerCase().split(/[;,]/).map(t => t.trim()).filter(Boolean)
                 })));
-                setAuthorOptions(uniqueSorted(data.posts.map(r => r.author)));
-                setTagOptions(uniqueSorted(data.posts.flatMap(r => r.tags.split(/[;,]/).map(t => t.trim()).filter(Boolean))));
+                const [authorRows, tagRows] = await Promise.all([tryFetchCSV('/linkedin_authors.csv'), tryFetchCSV('/linkedin_tags.csv')]);
+                if (!authorRows || !tagRows) throw new Error('Featured filter lists unavailable. Please reload.');
+                setAuthorOptions(extractCSVList(authorRows, ['author']));
+                setTagOptions(extractCSVList(tagRows, ['tag']));
             } catch (e) {
                 if (e.name !== 'AbortError') setError(e.message);
             } finally { setLoading(false); }
@@ -219,12 +221,12 @@ function LinkedInPostsDashboard() {
 
     // ⬇️ paste these two effects here
     useEffect(() => {
-        const allowed = (authorOptions.length ? authorOptions : allAuthors);
+        const allowed = (authorOptions);
         setAuthors(prev => prev.filter(a => allowed.includes(a)));
     }, [authorOptions, allAuthors]);
 
     useEffect(() => {
-        const allowed = (tagOptions.length ? tagOptions : allTags);
+        const allowed = (tagOptions);
         setTags(prev => prev.filter(t => allowed.includes(t)));
     }, [tagOptions, allTags]);
 
@@ -354,11 +356,11 @@ function LinkedInPostsDashboard() {
             <section className="grid gap-4 md:grid-cols-3">
                 <div className="space-y-1">
                     <label className="block text-xs uppercase text-gray-600">Post Authors</label>
-                    <MultiSelect options={authorOptions.length ? authorOptions : allAuthors} selected={authors} onChange={setAuthors} placeholder="All authors" />
+                    <MultiSelect options={authorOptions} selected={authors} onChange={setAuthors} placeholder="All authors" />
                 </div>
                 <div className="space-y-1">
                     <label className="block text-xs uppercase text-gray-600">Tags</label>
-                    <MultiSelect options={tagOptions.length ? tagOptions : allTags} selected={tags} onChange={setTags} placeholder="All tags" />
+                    <MultiSelect options={tagOptions} selected={tags} onChange={setTags} placeholder="All tags" />
                 </div>
                 <div className="space-y-1">
                     <label className="block text-xs uppercase text-gray-600">Search & Filters</label>
