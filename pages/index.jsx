@@ -177,9 +177,15 @@ function LinkedInPostsDashboard() {
         const controller = new AbortController();
         async function load() {
             try {
-                const response = await fetch('/api/posts', { signal: controller.signal });
-                const data = await response.json();
-                if (!response.ok) throw new Error(data.error || 'Collection unavailable');
+                const data = { posts: [] };
+                let page = 0;
+                do {
+                    const response = await fetch('/api/posts?page=' + page, { signal: controller.signal });
+                    const batch = await response.json();
+                    if (!response.ok) throw new Error(batch.error || 'Collection unavailable');
+                    data.posts.push(...batch.posts);
+                    page = batch.nextPage;
+                } while (page !== null);
                 setRows(data.posts.map(r => ({ ...r,
                     posted_at: r.posted_iso ? new Date(r.posted_iso + 'T00:00:00Z') : null,
                     posted_iso_abs: r.posted_iso,

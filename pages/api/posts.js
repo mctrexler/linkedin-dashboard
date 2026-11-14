@@ -1,6 +1,7 @@
 import {createSign} from 'node:crypto';
 import {publicRecords} from '../../utils/sheetRecords.cjs';
 let cached;
+let collectionCache;
 async function token(){
  if(cached&&cached.expires>Date.now())return cached.token;
  const email=process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,key=process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY?.replace(/\\n/g,'\n');
@@ -14,11 +15,17 @@ async function token(){
 }
 export default async function handler(req,res){
  if(req.method!=='GET'){res.setHeader('Allow','GET');return res.status(405).end();}
+ const page=Number(req.query.page || 0);
+ if(!Number.isInteger(page)||page<0||page>1000)return res.status(400).json({error:'Invalid page'});
  try{
   const id=process.env.GOOGLE_SHEETS_SPREADSHEET_ID;if(!id)throw new Error('Missing spreadsheet configuration');
-  const access=await token();const range=encodeURIComponent("'Posts'!A1:R10000");
-  const response=await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(id)}/values/${range}?valueRenderOption=FORMATTED_VALUE`,{headers:{Authorization:`Bearer ${access}`},signal:AbortSignal.timeout(15000)});
-  if(!response.ok)throw new Error('Spreadsheet read failed');const data=await response.json();
-  res.setHeader('Cache-Control','public, s-maxage=60');return res.status(200).json({posts:publicRecords(data.values)});
+  if(!collectionCache||collectionCache.id!==id||collectionCache.expires<Date.now()){
+   const access=await token();const range=encodeURIComponent("'Posts'!A1:R10000");
+   const response=await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(id)}/values/${range}?valueRenderOption=FORMATTED_VALUE`,{headers:{Authorization:`Bearer ${access}`},signal:AbortSignal.timeout(15000)});
+   if(!response.ok)throw new Error('Spreadsheet read failed');const data=await response.json();
+   collectionCache={id,posts:publicRecords(data.values),expires:Date.now()+60000};
+  }
+  const start=page*100,posts=collectionCache.posts.slice(start,start+100);
+  res.setHeader('Cache-Control','no-store');return res.status(200).json({posts,nextPage:start+100<collectionCache.posts.length?page+1:null});
  }catch(error){console.error('Posts feed:',error.message);res.setHeader('Cache-Control','no-store');return res.status(503).json({error:'The collection is temporarily unavailable. Please try again shortly.'});}
 }
