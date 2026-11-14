@@ -477,7 +477,7 @@ function LinkedInCard({ row }) {
                 </div>
             </div>
 
-            <button className="text-sm underline mt-2" onClick={() => setShowFull(true)}>Read full summary</button>
+            <button className="text-sm underline mt-2" onClick={() => { setOpen(false); setShowFull(true); }}>Read full summary</button>
             {showFull && <SummaryDialog row={row} onClose={() => setShowFull(false)} />}
             {/* Date */}
             {(() => {
@@ -522,6 +522,7 @@ function LinkedInCard({ row }) {
                             <div className="text-xs text-gray-500">{row.dateRaw}</div>
                         ) : null}
                         {row.summary && <p className="mt-2 text-gray-700">{row.summary}</p>}
+                        <button className="text-sm underline mt-2" onClick={() => { setOpen(false); setShowFull(true); }}>Read full summary</button>
                         {row.tags?.length ? (
                             <div className="mt-2 flex flex-wrap gap-1">
                                 {safeTags(row).map((t) => (
