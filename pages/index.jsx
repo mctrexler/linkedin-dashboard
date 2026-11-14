@@ -164,7 +164,7 @@ function LinkedInPostsDashboard() {
     // Filters / controls
     const [authors, setAuthors] = useState([]);
     const [tags, setTags] = useState([]);
-    const [period, setPeriod] = useState(-1); // All time by default
+    const [period, setPeriod] = useState(7); // Last 7 days by default
     const [maxResults, setMaxResults] = useState(200);
     const [search, setSearch] = useState("");
 
@@ -402,7 +402,7 @@ function LinkedInPostsDashboard() {
                                 setAuthors([]);
                                 setTags([]);
                                 setSearch("");
-                                setPeriod(-1);
+                                setPeriod(7);
                             }}
                         >
                             Reset
